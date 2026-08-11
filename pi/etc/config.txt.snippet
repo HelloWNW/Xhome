@@ -1,0 +1,12 @@
+# Append these to /boot/firmware/config.txt
+#
+# i2s + googlevoicehat-soundcard exposes an I2S MEMS microphone as an ALSA
+# capture device. enable_uart + disable-bt hands the PL011 UART to the GPS
+# module (the Pi Zero W otherwise gives it to Bluetooth).
+
+dtparam=i2s=on
+dtoverlay=googlevoicehat-soundcard
+camera_auto_detect=1
+enable_uart=1
+dtoverlay=disable-bt
+dtparam=i2c_arm=on

@@ -1,0 +1,24 @@
+# secrets / local config — never commit these
+.env
+*.env
+!*.env.example
+/etc/xhome.env
+web/public/config.js
+wrangler.toml
+
+# runtime state
+*.log
+*.ts
+*.m3u8
+*.jsonl
+gps.json
+track.json
+status.json
+viewers.json
+archive.json
+.durations.json
+hlsout/
+
+# os / editor
+.DS_Store
+node_modules/

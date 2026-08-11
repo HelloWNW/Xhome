@@ -1,0 +1,15 @@
+[Unit]
+Description=xhome broadcast watchdog (restarts a wedged-but-alive stream)
+After=xhome-broadcast.service
+Wants=xhome-broadcast.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xhome-watchdog.sh
+Restart=always
+RestartSec=15
+User=root
+Nice=15
+
+[Install]
+WantedBy=multi-user.target

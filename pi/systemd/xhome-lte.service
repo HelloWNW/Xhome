@@ -1,0 +1,15 @@
+[Unit]
+Description=xhome LTE data session (Telit LN940, QMI raw-IP)
+After=network.target
+Before=tailscaled.service
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xhome-lte-up.sh
+Restart=always
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target

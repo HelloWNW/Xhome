@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>xhome broadcast</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2563eb">
+<!-- iOS: these are what make "Add to Home Screen" open without Safari chrome -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="xhome">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<style>
+  :root {
+    color-scheme: light;
+    --bg:#eef0f4; --card:#fff; --ink:#1c1e24; --muted:#6b7280; --faint:#9aa1ad;
+    --line:#e1e5ea; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --accent:#2563eb;
+    --gap: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    /* dvh tracks mobile browser chrome appearing/disappearing, so the layout
+       stays exactly one screen tall instead of overflowing behind the URL bar */
+    height: 100dvh;
+    overflow: hidden;                 /* the whole point: no page scrolling */
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP",
+                 "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* ---------- header ---------- */
+  header {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--line);
+    flex-wrap: nowrap; overflow: hidden;
+  }
+  h1 {
+    font-size: .8rem; font-weight: 800; letter-spacing: .05em; margin: 0;
+    color: var(--muted); text-transform: uppercase; white-space: nowrap;
+  }
+  .spacer { flex: 1 1 auto; }
+  .pill {
+    border: 1px solid var(--line); background: var(--card); color: var(--muted);
+    border-radius: 999px; padding: 5px 11px; font-size: .74rem; cursor: pointer;
+    font-family: inherit; font-weight: 700; white-space: nowrap;
+  }
+  .pill.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .grp { display: flex; gap: 5px; }
+
+  /* ---------- layout ---------- */
+  main {
+    flex: 1 1 auto; min-height: 0;          /* min-height:0 lets children shrink */
+    display: grid; gap: var(--gap); padding: var(--gap);
+  }
+  /* Landscape / desktop: video left, map+info right */
+  @media (orientation: landscape) {
+    main { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-rows: minmax(0,1fr); }
+  }
+  /* Portrait / phone: video top, the rest below */
+  @media (orientation: portrait) {
+    main { grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0,1fr); }
+  }
+  .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.05); overflow: hidden;
+    min-height: 0; display: flex; flex-direction: column;
+  }
+
+  /* ---------- video ---------- */
+  .videobox { position: relative; background: #0d0f13; flex: 1 1 auto; min-height: 0; }
+  @media (orientation: portrait) { .videobox { aspect-ratio: 16/9; flex: 0 0 auto; } }
+  video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: #0d0f13; display: block;
+  }
+  .soundbtn {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: rgba(17,20,26,.88); color: #fff; border: 0; border-radius: 999px;
+    padding: 9px 16px; font-size: .8rem; font-weight: 700; cursor: pointer;
+    font-family: inherit; display: none; z-index: 5;
+  }
+  .soundbtn.show { display: block; }
+
+  /* Give-up overlay: the broadcast keeps playing underneath, blurred, so it is
+     obvious at a glance that the walk is over without cutting the video off. */
+  .giveup {
+    position: absolute; inset: 0; z-index: 6; display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 6px;
+    background: rgba(13,15,19,.42);
+    backdrop-filter: blur(14px) saturate(.7);
+    -webkit-backdrop-filter: blur(14px) saturate(.7);
+    text-align: center; padding: 16px;
+  }
+  .giveup.show { display: flex; }
+  .giveup .gmsg {
+    color: #fff; font-size: clamp(1.1rem, 4.2vw, 2.1rem); font-weight: 800;
+    letter-spacing: .02em; text-shadow: 0 2px 12px rgba(0,0,0,.55);
+  }
+  .giveup .gsub {
+    color: rgba(255,255,255,.82); font-size: .8rem; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .gbadge {
+    display: none; align-items: center; padding: 3px 9px; border-radius: 999px;
+    background: #fee2e2; border: 1px solid #fecaca; color: #b91c1c;
+    font-size: .68rem; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
+  }
+  .gbadge.show { display: inline-flex; }
+
+  .underbar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px 14px;
+    padding: 8px 11px; border-top: 1px solid var(--line); flex-wrap: wrap;
+    font-size: .76rem;
+  }
+  .status { font-weight: 700; color: var(--muted); }
+  .status.live { color: var(--ok); } .status.offline { color: var(--bad); }
+  .chain { display: flex; align-items: center; gap: 6px; color: var(--faint); }
+  .chain .node { display: inline-flex; align-items: center; gap: 4px; }
+  .chain .node i { width: 7px; height: 7px; border-radius: 50%; background: #cbd2da; }
+  .chain .node.ok i { background: var(--ok); } .chain .node.bad i { background: var(--bad); }
+  .chain .node.warn i { background: var(--warn); }
+  .chain .node.bad { color: var(--bad); font-weight: 700; }
+  .chain .arrow { color: #cbd2da; }
+  .verdict { padding: 0 11px 8px; font-size: .72rem; color: var(--muted); line-height: 1.45; }
+  .verdict.bad { color: var(--bad); } .verdict:empty { display: none; }
+
+  .arch { flex: 0 0 auto; padding: 8px 11px; border-top: 1px solid var(--line); display: none; }
+  .arch.show { display: block; }
+  .arch select {
+    width: 100%; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); font-family: inherit; font-size: .78rem;
+  }
+  .archtime { margin-top: 6px; font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .archtime b { color: var(--ink); }
+
+  /* ---------- map + info ---------- */
+  .mapcard { flex: 1 1 auto; min-height: 0; position: relative; }
+  .mapbtns {
+    position: absolute; top: 8px; right: 8px; z-index: 500;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .mapbtn {
+    background: rgba(255,255,255,.95); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 6px 10px; font-size: .72rem; font-weight: 700;
+    cursor: pointer; font-family: inherit; box-shadow: 0 1px 3px rgba(16,24,40,.15);
+    white-space: nowrap;
+  }
+  .mapbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #map { flex: 1 1 auto; min-height: 0; width: 100%; background: #e7ebf0; }
+
+  /* Street-level view of the current position, pinned bottom-right of the map.
+     Sits above Leaflet's panes but clear of the attribution, which must stay
+     readable. Costs the Pi nothing -- it loads in the viewer's browser. */
+  .svbox {
+    position: absolute; right: 8px; bottom: 10px; z-index: 600;
+    width: 36%; max-width: 240px; min-width: 148px;
+    border-radius: 10px; overflow: hidden; background: #dfe3e8;
+    border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(16,24,40,.25);
+    display: none;
+  }
+  .svbox.show { display: block; }
+  .svbox .svhead {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 3px 4px 3px 7px; background: rgba(255,255,255,.95);
+    font-size: .64rem; font-weight: 700; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .svbox .svhead button {
+    border: 0; background: transparent; color: var(--faint); cursor: pointer;
+    font-family: inherit; font-size: .8rem; line-height: 1; padding: 2px 4px;
+  }
+  .svbox .svframe { position: relative; width: 100%; aspect-ratio: 4 / 3; }
+  .svbox iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+  .svbox .svnone {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    text-align: center; padding: 8px; font-size: .66rem; color: var(--faint); background: #dfe3e8;
+  }
+  .svbox.nodata .svnone { display: flex; }
+  @media (orientation: portrait) { .svbox { width: 45%; max-width: 190px; } }
+  .leaflet-container { background: #e7ebf0 !important; font: inherit !important; }
+  /* Keep attribution to the left half: it must stay readable, and the
+     street-view pane occupies the right ~36% of the map. */
+  .leaflet-control-attribution {
+    max-width: 48%; font-size: .6rem !important; line-height: 1.35;
+  }
+
+  .infocard { flex: 0 0 auto; max-height: 46%; overflow-y: auto; }
+  .infogrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 2px 12px; padding: 8px 11px;
+    font-size: .73rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .kv { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+  .kv .label { color: var(--faint); white-space: nowrap; }
+  .kv b { font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kv b.good { color: var(--ok); } .kv b.warn { color: var(--warn); } .kv b.bad { color: var(--bad); }
+  .sep { grid-column: 1/-1; height: 1px; background: var(--line); margin: 5px 0; }
+  /* Audio level meter: RMS as a filled bar, peak as a hairline, so a stream
+     that is technically playing but silent is visible at a glance. */
+  .meter {
+    grid-column: 1/-1; position: relative; height: 5px; margin: 1px 0 3px;
+    border-radius: 3px; background: var(--line); overflow: hidden;
+  }
+  .meter i { position: absolute; left: 0; top: 0; height: 100%; width: 0;
+             background: var(--ok); border-radius: 3px; transition: width .1s linear; }
+  .meter i.hot  { background: var(--warn); }
+  .meter i.clip { background: var(--bad); }
+  .meter u { position: absolute; top: 0; height: 100%; width: 2px; background: var(--ink);
+             opacity: .55; left: 0; transition: left .1s linear; }
+  .hint { padding: 0 11px 8px; font-size: .69rem; color: var(--faint); line-height: 1.45; }
+  .hint:empty { display: none; }
+  .legend {
+    display: flex; gap: 10px; flex-wrap: wrap; padding: 6px 11px;
+    border-top: 1px solid var(--line); font-size: .68rem; color: var(--faint);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i { width: 12px; height: 3px; border-radius: 2px; }
+  .legend i.dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ---------- passcode gate ---------- */
+  .lock {
+    position: fixed; inset: 0; z-index: 9999; background: #eef0f4;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .lock.hidden { display: none; }
+  .lockbox {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 28px 24px; width: 100%; max-width: 320px; text-align: center;
+    box-shadow: 0 8px 30px rgba(16,24,40,.10);
+  }
+  .lockicon { font-size: 1.7rem; }
+  .locktitle { margin: 8px 0 16px; font-size: .9rem; font-weight: 700; color: var(--muted); }
+  .lockbox input {
+    width: 100%; padding: 11px 12px; font-size: 1rem; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfd; color: var(--ink);
+    text-align: center; letter-spacing: .08em;
+  }
+  .lockbox input:focus { outline: none; border-color: var(--accent); }
+  .lockgo {
+    margin-top: 12px; width: 100%; padding: 11px; border: 0; border-radius: 10px;
+    background: var(--accent); color: #fff; font-weight: 800; font-size: .9rem;
+    font-family: inherit; cursor: pointer;
+  }
+  .lockerr { margin-top: 10px; font-size: .78rem; color: var(--bad); min-height: 1em; }
+  .pill.armed { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .viewers {
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
+    font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .viewers .eye { opacity: .65; font-size: .8rem; }
+  .viewers b { font-weight: 800; color: var(--ink); }
+  .viewers.some { border-color: #bfdbfe; background: #eff6ff; }
+  .viewers.some b { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Passcode gate. NOTE: this hides the UI only; the stream URLs themselves
+     are not protected by it. -->
+<div id="lock" class="lock">
+  <div class="lockbox">
+    <div class="lockicon">🔒</div>
+    <div class="locktitle" data-t="lockTitle">Enter passcode</div>
+    <input id="lockInput" type="password" inputmode="text" autocomplete="current-password"
+           autocapitalize="off" spellcheck="false">
+    <button id="lockBtn" class="lockgo" data-t="lockGo">unlock</button>
+    <div class="lockerr" id="lockErr"></div>
+  </div>
+</div>
+
+<header>
+  <h1 id="tTitle">xhome</h1>
+  <div class="grp">
+    <button id="btnLive" class="pill on" data-t="mLive">live</button>
+    <button id="btnArch" class="pill" data-t="mArchive">archive</button>
+    <span class="viewers" id="viewers" title=""><span class="eye">👁</span><b id="viewCount">—</b></span>
+    <span class="gbadge" id="gaveUpBadge" data-t="giveUp">ギブアップ</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="grp">
+    <button id="btnNotify" class="pill" data-t="bNotify">🔔</button>
+    <button id="btnJa" class="pill">日本語</button>
+    <button id="btnEn" class="pill">EN</button>
+  </div>
+</header>
+
+<main>
+  <!-- video pane -->
+  <section class="pane">
+    <div class="card" style="flex:1 1 auto">
+      <div class="videobox">
+        <video id="video" controls autoplay playsinline crossorigin="anonymous"></video>
+        <video id="avideo" controls playsinline crossorigin="anonymous" style="display:none"></video>
+        <button class="soundbtn" id="soundBtn">🔊</button>
+        <div class="giveup" id="giveupOverlay">
+          <div class="gmsg" data-t="giveUpMsg">ギブアップ</div>
+          <div class="gsub" data-t="giveUpAt"></div>
+        </div>
+      </div>
+      <div class="underbar">
+        <span class="status" id="status">…</span>
+        <span class="chain">
+          <span class="node" id="nPi"><i></i><span data-t="pi">pi</span></span>
+          <span class="arrow">→</span>
+          <span class="node" id="nTx"><i></i><span data-t="transcode">transcode</span></span>
+          <span class="arrow">→</span>
+          <span class="node" id="nWeb"><i></i><span data-t="player">player</span></span>
+        </span>
+      </div>
+      <div class="verdict" id="verdict"></div>
+      <div class="arch" id="archWrap">
+        <select id="archSel"></select>
+        <div class="archtime" id="archTime"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- map + info pane -->
+  <section class="pane">
+    <div class="card mapcard">
+      <div id="map"></div>
+      <div class="svbox show" id="svBox">
+        <div class="svhead"><span id="svLabel" data-t="svTitle">street view</span><button id="svClose">✕</button></div>
+        <div class="svframe">
+          <iframe id="svFrame" referrerpolicy="no-referrer-when-downgrade" allowfullscreen loading="lazy"></iframe>
+          <div class="svnone" data-t="svNone">no street imagery here</div>
+        </div>
+      </div>
+      <div class="mapbtns">
+        <button id="btnFollow" class="mapbtn" data-t="bFollow">現在地</button>
+        <button id="btnAll" class="mapbtn" data-t="bAll">全体</button>
+        <button id="btnSv" class="mapbtn on" data-t="bSv">街並み</button>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:#16a34a"></i><span data-t="start">start</span></span>
+        <span><i class="dot" style="background:#2563eb"></i><span data-t="now">current</span></span>
+        <span><i class="dot" style="background:#dc2626"></i><span data-t="goal">goal</span></span>
+        <span><i style="background:#2563eb"></i><span data-t="pathleg">start → now</span></span>
+        <span><i style="background:#ea580c"></i><span data-t="goalleg">now → goal</span></span>
+      </div>
+    </div>
+
+    <div class="card infocard">
+      <div class="infogrid">
+        <span class="kv"><span class="label" data-t="piping">pi network</span><b id="piPingEl">—</b></span>
+        <span class="kv"><span class="label" data-t="pistream">pi stream</span><b id="piPubEl">—</b></span>
+        <span class="sep"></span>
+        <span class="kv"><span class="label" data-t="delay">delay</span><b id="latency">—</b></span>
+        <span class="kv"><span class="label" data-t="behind">behind live</span><b id="edge">—</b></span>
+        <span class="kv"><span class="label" data-t="buffer">buffer</span><b id="buffer">—</b></span>
+        <span class="kv"><span class="label" data-t="audio">audio</span><b id="audioDb">—</b></span>
+        <span class="meter"><i id="meterBar"></i><u id="meterPeak"></u></span>
+        <span class="sep"></span>
+        <span class="kv"><span class="label" data-t="gps">gps</span><b id="gpsFix">—</b></span>
+        <span class="kv"><span class="label" data-t="sats">satellites</span><b id="gpsSats">—</b></span>
+        <span class="kv"><span class="label" data-t="updated">updated</span><b id="gpsAge">—</b></span>
+        <span class="kv"><span class="label" data-t="position">position</span><b id="gpsPos">—</b></span>
+        <span class="kv"><span class="label" data-t="place">location</span><b id="placeEl">—</b></span>
+        <span class="kv"><span class="label" data-t="alt">altitude</span><b id="altEl">—</b></span>
+        <span class="kv"><span class="label" data-t="speed">speed</span><b id="spdEl">—</b></span>
+        <span class="sep"></span>
+        <span class="kv"><span class="label" data-t="walked2">walked</span><b id="doneDist">—</b></span>
+        <span class="kv"><span class="label" data-t="togoal">to goal</span><b id="routeDist">—</b></span>
+        <span class="kv"><span class="label" data-t="spent">elapsed</span><b id="spentEl">—</b></span>
+        <span class="kv"><span class="label" data-t="remaining">remaining</span><b id="remainEl">—</b></span>
+        <span class="kv"><span class="label" data-t="total">total</span><b id="totalEl">—</b></span>
+        <span class="kv"><span class="label" data-t="eta">arrival</span><b id="etaEl">—</b></span>
+      </div>
+      <div class="hint" id="hint"></div>
+    </div>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script>
+
+/* ===================== configuration ===================== */
+const CFG  = window.XHOME_CONFIG || {};
+const BASE = (CFG.streamBase || "").replace(/\/+$/, "");
+
+const STREAM_URL = BASE + "/live/hd/hd.m3u8";
+const GPS_URL    = BASE + "/gps.json";
+const TRACK_URL  = BASE + "/track.json";
+const STATUS_URL = BASE + "/status.json";
+
+const START = CFG.start || [0, 0];
+const GOAL  = CFG.goal  || [0, 0];
+const WALK_MPS = CFG.walkMps || 1.35;   // assumed pace, m/s
+const GAP_M    = CFG.gapM    || 250;    // beyond this, data is missing -> interpolate
+
+/* Set config.giveUp once a journey has ended. Past that moment the page stops
+ * being a live tracker -- the route, the walked path and the street view all
+ * freeze at the give-up point -- but the broadcast itself keeps running for as
+ * long as the Pi keeps sending. Leave it null for an ongoing journey. */
+const GIVEUP     = CFG.giveUp || null;
+const GIVEUP_TS  = GIVEUP ? GIVEUP.ts  : Infinity;
+const GIVEUP_POS = GIVEUP ? GIVEUP.pos : null;
+function gaveUp() { return GIVEUP !== null && Date.now() / 1000 >= GIVEUP_TS; }
+
+/* ===================== i18n ===================== */
+const I18N = {
+  en: {
+    pi:"pi", transcode:"transcode", player:"player",
+    delay:"delay", behind:"behind live", buffer:"buffer",
+    audio:"audio", audMuted:"muted", audSilent:"SILENT", audNa:"n/a",
+    journey:"journey", start:"start", now:"current", goal:"goal",
+    walked:"walked", estimated:"estimated",
+    gps:"gps", position:"position", sats:"satellites", updated:"updated",
+    togoal:"to goal", walked2:"walked",
+    pathleg:"start → now", goalleg:"now → goal (est.)",
+    pathlegEnd:"start → gave up", goallegEnd:"gave up → goal (est.)",
+    bFollow:"follow", bAll:"overview", bNotify:"🔔", bSv:"street",
+    svTitle:"street view", svNone:"no street imagery here",
+    watching:(l,a)=>`${l} watching live` + (a ? `, ${a} on archive` : ""),
+    lockTitle:"Enter passcode", lockGo:"unlock", lockBad:"wrong passcode",
+    stopped:"broadcast stopped", waitingLive:"waiting for the broadcast to resume…",
+    notifOn:"Alerts on — you'll be notified when the stream recovers",
+    notifOff:"Alerts off", notifDenied:"Notifications are blocked in browser settings",
+    notifIos:"On iPhone, add this to your Home Screen first (Share → Add to Home Screen), then enable alerts.",
+    recovTitle:"Stream is back",
+    recovBody:(m)=>`Broadcast resumed after ${m} minutes down.`,
+    piping:"pi network", pistream:"pi stream",
+    pingOk:"reachable", pingNg:"NO RESPONSE", pubOk:"sending", pubNg:"stopped",
+    vPiOffline:"The Pi is not responding to ping — it is powered off, crashed, or has lost its network.",
+    vPiUpNoStream:"The Pi is reachable but not sending video — the encoder stopped or is restarting. It usually recovers on its own within ~90s.",
+    startName:"Start", goalName:"Goal",
+    mLive:"live", mArchive:"archive", recAt:"recorded", noArch:"no recordings yet",
+    giveUp:"GAVE UP", giveUpMsg:"GAVE UP", giveUpAt:"",
+    phaseWalk:"— the walk", phaseAfter:"— after giving up",
+    giveUpWhere:"gave up here", piPos:"device position",
+    finalWalked:"walked", finalRest:"remaining (est.)",
+    archPos:"position at this moment", playhead:"clip time",
+    place:"location", alt:"altitude", speed:"speed",
+    spent:"elapsed", remaining:"remaining", total:"total", eta:"arrival",
+    live:"live", connecting:"connecting…", reconnecting:"reconnecting…",
+    recovering:"recovering video…", resync:"re-syncing…", tapPlay:"tap to play",
+    sound:"🔊 tap for sound",
+    vPiDown:"The Pi is not sending video. Check its power, LTE link, or camera.",
+    vTxDown:"The Pi is sending, but the transcoder is not producing output",
+    vPiStopped:"The Pi stopped sending — you are seeing the last buffered seconds.",
+    vPaused:"Broadcast is healthy — playback is paused or buffering in this browser.",
+    vNoServer:"Cannot reach the broadcast server.",
+    vStale:"Status is stale — the monitor on the broadcast server stopped reporting.",
+    noFixSky:"No satellites visible. The receiver needs a clear view of the sky.",
+    noFixN:(n,s)=>`${n} satellite${n===1?"":"s"} visible, strongest ${s} dB-Hz. A fix needs 4 at ~30 dB-Hz.`,
+    lostAt:(t,a)=>`GPS signal lost — showing last known position from ${t} (${a}).`,
+    ago:(s)=>s, secs:"s ago", mins:"m ago", hours:"h ago",
+    fix0:"no data", fix1:"no fix", fix2:"2D fix", fix3:"3D fix",
+    clock:"clock?"
+  },
+  ja: {
+    pi:"Pi", transcode:"変換", player:"再生",
+    delay:"遅延", behind:"ライブ差", buffer:"バッファ",
+    audio:"音量", audMuted:"ミュート", audSilent:"無音", audNa:"—",
+    journey:"移動記録", start:"出発", now:"現在地", goal:"目的地",
+    walked:"歩いた道", estimated:"推定経路",
+    gps:"GPS", position:"座標", sats:"衛星", updated:"更新",
+    togoal:"目的地まで", walked2:"歩行距離",
+    pathleg:"出発〜現在", goalleg:"現在〜目的地（推定）",
+    pathlegEnd:"出発〜ギブアップ", goallegEnd:"ギブアップ〜目的地（推定）",
+    bFollow:"現在地", bAll:"全体", bNotify:"🔔", bSv:"街並み",
+    svTitle:"ストリートビュー", svNone:"この地点の画像はありません",
+    watching:(l,a)=>`ライブ視聴 ${l}人` + (a ? `、録画 ${a}人` : ""),
+    lockTitle:"パスコードを入力", lockGo:"解除", lockBad:"パスコードが違います",
+    stopped:"配信停止中", waitingLive:"配信の再開を待っています…",
+    notifOn:"通知オン — 配信復旧時にお知らせします",
+    notifOff:"通知オフ", notifDenied:"ブラウザの設定で通知がブロックされています",
+    notifIos:"iPhoneではホーム画面に追加してから（共有→ホーム画面に追加）通知を有効にしてください。",
+    recovTitle:"配信が復旧しました",
+    recovBody:(m)=>`${m}分の停止のあと配信が再開しました。`,
+    piping:"Pi応答", pistream:"Pi配信",
+    pingOk:"応答あり", pingNg:"応答なし", pubOk:"送信中", pubNg:"停止",
+    vPiOffline:"Piがpingに応答しません。電源断・停止・ネットワーク喪失のいずれかです。",
+    vPiUpNoStream:"Piは応答していますが映像を送っていません。配信側の停止または再起動中です。通常90秒ほどで自動復旧します。",
+    startName:"スタート地点", goalName:"ゴール地点",
+    mLive:"ライブ", mArchive:"録画", recAt:"録画時刻", noArch:"録画はまだありません",
+    giveUp:"ギブアップ", giveUpMsg:"ギブアップ", giveUpAt:"",
+    giveUpWhere:"ギブアップ地点", piPos:"端末位置",
+    finalWalked:"歩行距離", finalRest:"残り(推定)",
+    phaseWalk:"— 歩行", phaseAfter:"— ギブアップ後",
+    archPos:"この時点の位置", playhead:"再生位置",
+    place:"現在地", alt:"標高", speed:"速度",
+    spent:"経過時間", remaining:"残り時間", total:"合計", eta:"到着予定",
+    live:"配信中", connecting:"接続中…", reconnecting:"再接続中…",
+    recovering:"映像を復旧中…", resync:"再同期中…", tapPlay:"タップで再生",
+    sound:"🔊 タップで音声オン",
+    vPiDown:"Piから映像が届いていません。電源・LTE・カメラを確認してください。",
+    vTxDown:"Piは送信中ですが、変換サーバーが出力していません",
+    vPiStopped:"Piの送信が止まりました。直前のバッファを表示しています。",
+    vPaused:"配信は正常です。このブラウザで一時停止または読み込み中です。",
+    vNoServer:"配信サーバーに接続できません。",
+    vStale:"状態が古くなっています。監視プロセスが停止した可能性があります。",
+    noFixSky:"衛星が見えません。空が開けた場所が必要です。",
+    noFixN:(n,s)=>`衛星${n}個を捕捉、最大${s} dB-Hz。測位には30 dB-Hz程度が4個必要です。`,
+    lostAt:(t,a)=>`GPS信号が途切れました。${t}（${a}）の最終位置を表示しています。`,
+    ago:(s)=>s, secs:"秒前", mins:"分前", hours:"時間前",
+    fix0:"データなし", fix1:"未測位", fix2:"2D測位", fix3:"3D測位",
+    clock:"時計ずれ?"
+  }
+};
+let LANG = "en";
+const T = () => I18N[LANG];
+
+/* Place names and the give-up wording are installation-specific: they live in
+ * config.js so this file carries no particular journey. Merge over defaults. */
+for (const lang of ["en", "ja"]) {
+  const d = I18N[lang];
+  if (CFG.startName && CFG.startName[lang]) d.startName = CFG.startName[lang];
+  if (CFG.goalName  && CFG.goalName[lang])  d.goalName  = CFG.goalName[lang];
+  if (GIVEUP && GIVEUP.msg && GIVEUP.msg[lang]) d.giveUpMsg = GIVEUP.msg[lang];
+  if (GIVEUP && GIVEUP.at) d.giveUpAt = GIVEUP.at;
+}
+
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("[data-t]").forEach(el => {
+    const v = T()[el.dataset.t];
+    if (typeof v === "string") el.textContent = v;
+  });
+  document.getElementById("btnJa").classList.toggle("on", LANG === "ja");
+  document.getElementById("btnEn").classList.toggle("on", LANG === "en");
+  soundBtn.textContent = T().sound;
+  // Tiles and permanent map labels are language-specific too.
+  if (map) {
+    applyTiles();
+    if (startM) startM.setTooltipContent(T().startName);
+    if (goalM)  goalM.setTooltipContent(T().goalName);
+    if (giveupM) giveupM.setTooltipContent(T().giveUpWhere);
+  }
+  renderGps();      // re-render dynamic strings in the new language
+  renderStatus();
+}
+
+function setLang(l, remember) {
+  LANG = (l === "ja") ? "ja" : "en";
+  if (remember) { try { localStorage.setItem("xhome_lang", LANG); } catch (e) {} }
+  applyLang();
+}
+
+// Default to Japanese for visitors in Japan. Cloudflare's trace endpoint gives
+// the client country without any extra service; navigator.language is the
+// fallback when that is unavailable.
+async function detectLang() {
+  let saved = null;
+  try { saved = localStorage.getItem("xhome_lang"); } catch (e) {}
+  if (saved) { setLang(saved, false); return; }
+
+  let lang = (navigator.language || "").toLowerCase().startsWith("ja") ? "ja" : "en";
+  try {
+    const r = await fetch("/cdn-cgi/trace", { cache: "no-store" });
+    if (r.ok) {
+      const m = (await r.text()).match(/^loc=([A-Z]{2})$/m);
+      if (m) lang = (m[1] === "JP") ? "ja" : "en";
+    }
+  } catch (e) { /* keep navigator guess */ }
+  setLang(lang, false);
+}
+
+/* ===================== elements ===================== */
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+const soundBtn = document.getElementById("soundBtn");
+const latencyEl = document.getElementById("latency");
+const edgeEl = document.getElementById("edge");
+const bufferEl = document.getElementById("buffer");
+const hintEl = document.getElementById("hint");
+const verdictEl = document.getElementById("verdict");
+const nPi = document.getElementById("nPi"), nTx = document.getElementById("nTx"), nWeb = document.getElementById("nWeb");
+const gpsFixEl = document.getElementById("gpsFix"), gpsPosEl = document.getElementById("gpsPos");
+const gpsSatsEl = document.getElementById("gpsSats"), gpsAgeEl = document.getElementById("gpsAge");
+const routeDistEl = document.getElementById("routeDist");
+const piPingEl = document.getElementById("piPingEl"), piPubEl = document.getElementById("piPubEl");
+const doneDistEl = document.getElementById("doneDist");
+const placeEl = document.getElementById("placeEl"), altEl = document.getElementById("altEl");
+const spdEl = document.getElementById("spdEl"), spentEl = document.getElementById("spentEl");
+const remainEl = document.getElementById("remainEl"), totalEl = document.getElementById("totalEl");
+const etaEl = document.getElementById("etaEl");
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = "status" + (cls ? " " + cls : "");
+}
+
+/* ===================== helpers ===================== */
+function haversine(a, b) {
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+  const s = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+const fmtDist = m => m < 1000 ? Math.round(m) + " m" : (m/1000).toFixed(2) + " km";
+function fmtEta(sec) {
+  if (sec < 60) return Math.round(sec) + (LANG === "ja" ? "秒" : " s");
+  if (sec < 3600) return Math.round(sec/60) + (LANG === "ja" ? "分" : " min");
+  const h = Math.floor(sec/3600);
+  return h + (LANG === "ja" ? "時間" : "h ") + Math.round((sec - h*3600)/60) + (LANG === "ja" ? "分" : "m");
+}
+function ageText(s) {
+  if (s < 60) return Math.round(s) + T().secs;
+  if (s < 3600) return Math.round(s/60) + T().mins;
+  return Math.round(s/3600) + T().hours;
+}
+const fmt1 = s => s.toFixed(1) + "s";
+
+/* ===================== player ===================== */
+/* Audio is wanted, but browsers refuse unmuted autoplay without a gesture.
+ * Strategy: try with sound; if refused, fall back to muted playback (so the
+ * picture is never blank) and offer a one-tap control to enable sound. */
+let userPaused = false;
+let lastGesture = 0;
+
+/* Distinguishing a deliberate pause from an automatic one matters: we must
+ * auto-resume the second but never fight the first.
+ *
+ * navigator.userActivation.hasBeenActive is useless here -- it stays true
+ * forever after any click (including unlocking the passcode), so every
+ * error-induced pause looked "deliberate" and playback was never resumed.
+ * Instead, treat a pause as deliberate only if it lands within a moment of an
+ * actual gesture. */
+["pointerdown", "click", "touchstart"].forEach(ev =>
+  video.addEventListener(ev, () => { lastGesture = Date.now(); }, { passive: true }));
+document.addEventListener("keydown", () => { lastGesture = Date.now(); }, { passive: true });
+
+video.addEventListener("pause", () => {
+  userPaused = (Date.now() - lastGesture) < 600;
+});
+video.addEventListener("play", () => { userPaused = false; });
+
+soundBtn.addEventListener("click", () => {
+  video.muted = false;
+  video.volume = 1;
+  video.play().catch(() => {});
+  soundBtn.classList.remove("show");
+});
+
+function tryPlay() {
+  if (userPaused) return;
+  video.muted = false;
+  const p = video.play();
+  if (p && p.catch) {
+    p.catch(() => {
+      // Sound refused: keep the video visible, ask for one tap to unmute.
+      video.muted = true;
+      video.play().then(() => {
+        soundBtn.classList.add("show");
+      }).catch(() => {
+        setStatus(T().tapPlay, "offline");
+        const resume = () => { userPaused = false; video.muted = false; video.play().catch(() => {}); };
+        document.body.addEventListener("click", resume, { once: true });
+      });
+    });
+  }
+}
+
+let currentHls = null, rebuildTimer = null, rebuildDelay = 3000;
+
+/* Immediate rebuild, bypassing backoff. Used when the broadcast server
+ * reports the stream healthy again -- there is no reason to sit out a 30s
+ * backoff when we know for a fact there is something to play. */
+function forceRebuild() {
+  if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+  if (currentHls) { try { currentHls.destroy(); } catch (e) {} currentHls = null; }
+  rebuildDelay = 3000;
+  setStatus(T().reconnecting);
+  loadSource();
+}
+
+function rebuild() {
+  if (rebuildTimer) return;
+  setStatus(T().reconnecting);
+  if (currentHls) { try { currentHls.destroy(); } catch (e) {} currentHls = null; }
+  rebuildTimer = setTimeout(() => {
+    rebuildTimer = null;
+    rebuildDelay = Math.min(rebuildDelay * 1.6, 30000);
+    loadSource();
+  }, rebuildDelay);
+}
+
+/* ---------------- audio level meter ----------------
+ * Shows the real dBFS of what is coming out of the player, so "is the audio
+ * actually there" is answerable from the page instead of by ear. This is what
+ * exposed the denoiser gating quiet passages down to near-silence.
+ *
+ * SAFETY: createMediaElementSource DIVERTS the element's audio into the Web
+ * Audio graph. If the AudioContext is suspended (autoplay policy) the graph
+ * does not run and the stream goes SILENT. So the graph is only ever built
+ * once the context is confirmed running, and the analyser is wired straight
+ * through to destination to keep playback audible.
+ */
+const meterBar = document.getElementById("meterBar");
+const meterPeak = document.getElementById("meterPeak");
+const audioDbEl = document.getElementById("audioDb");
+
+const METER_FLOOR = -60;          // bottom of the scale
+const SILENT_DB   = -55;          // below this is effectively no signal
+let meterCtx = null, meterOff = false;
+const meterNodes = new WeakMap(); // element -> analyser (one source per element, ever)
+let silentSince = 0;
+
+async function attachMeter(el) {
+  if (meterOff || !el || meterNodes.has(el)) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { meterOff = true; return; }
+  try {
+    if (!meterCtx) meterCtx = new AC();
+    if (meterCtx.state !== "running") await meterCtx.resume();
+    if (meterCtx.state !== "running") return;   // retry later; never divert into a dead graph
+    const src = meterCtx.createMediaElementSource(el);
+    const an = meterCtx.createAnalyser();
+    an.fftSize = 2048;
+    src.connect(an);
+    an.connect(meterCtx.destination);           // keep it audible
+    meterNodes.set(el, { an, buf: new Float32Array(an.fftSize) });
+  } catch (e) {
+    // Cross-origin media without CORS taints the graph; reporting nothing is
+    // better than reporting a false silence.
+    meterOff = true;
+  }
+}
+
+function paintMeter(db, peakDb, label, cls) {
+  if (label) {
+    audioDbEl.textContent = label;
+    audioDbEl.className = cls || "";
+    meterBar.style.width = "0%";
+    meterPeak.style.left = "0%";
+    return;
+  }
+  audioDbEl.textContent = db <= METER_FLOOR ? "−∞ dB" : db.toFixed(0) + " dB";
+  audioDbEl.className = cls || "";
+  const pct = (v) => Math.max(0, Math.min(100, ((v - METER_FLOOR) / -METER_FLOOR) * 100));
+  meterBar.style.width = pct(db) + "%";
+  meterPeak.style.left = pct(peakDb) + "%";
+  meterBar.className = peakDb > -1 ? "clip" : (peakDb > -6 ? "hot" : "");
+}
+
+function updateMeter() {
+  const el = (typeof inArchiveMode === "function" && inArchiveMode()) ? avideo : video;
+  if (meterOff) { paintMeter(0, 0, T().audNa, "");  return; }
+  if (!el || el.paused) { paintMeter(0, 0, "—", ""); silentSince = 0; return; }
+  if (el.muted || el.volume === 0) { paintMeter(0, 0, T().audMuted, "warn"); silentSince = 0; return; }
+
+  const n = meterNodes.get(el);
+  if (!n) { attachMeter(el); paintMeter(0, 0, "—", ""); return; }
+
+  n.an.getFloatTimeDomainData(n.buf);
+  let sum = 0, peak = 0;
+  for (let i = 0; i < n.buf.length; i++) {
+    const v = n.buf[i];
+    sum += v * v;
+    const a = Math.abs(v);
+    if (a > peak) peak = a;
+  }
+  const rms = Math.sqrt(sum / n.buf.length);
+  const db = 20 * Math.log10(rms || 1e-9);
+  const pk = 20 * Math.log10(peak || 1e-9);
+
+  // Sustained silence while playing is a fault worth flagging, but a brief
+  // quiet moment is normal -- require several seconds before calling it.
+  let cls = "good";
+  if (db < SILENT_DB) {
+    if (!silentSince) silentSince = Date.now();
+    if (Date.now() - silentSince > 5000) { paintMeter(db, pk, T().audSilent, "bad"); return; }
+    cls = "";
+  } else {
+    silentSince = 0;
+    if (db < -40) cls = "warn";
+  }
+  paintMeter(db, pk, null, cls);
+}
+
+/* Put the page into its post-give-up state: blurred notice over the video,
+ * a badge in the header, and no street-view follow. The broadcast itself is
+ * deliberately untouched -- video and audio keep playing for as long as the
+ * Pi keeps sending. */
+function applyGiveUp() {
+  const on = gaveUp();
+  // The legend must name the right anchor: the projected leg no longer starts
+  // from a moving walker, it starts from where they stopped.
+  const pl = document.querySelector('[data-t="pathleg"]');
+  const gl = document.querySelector('[data-t="goalleg"]');
+  if (pl) pl.textContent = on ? T().pathlegEnd : T().pathleg;
+  if (gl) gl.textContent = on ? T().goallegEnd : T().goalleg;
+  const ov = document.getElementById("giveupOverlay");
+  const bd = document.getElementById("gaveUpBadge");
+  if (ov) ov.classList.toggle("show", on && !inArchiveMode());
+  if (bd) bd.classList.toggle("show", on);
+  if (on && typeof setSvVisible === "function" && svOn) setSvVisible(false);
+  if (on && btnSv) btnSv.style.display = "none";
+}
+// Deferred: this runs before the street-view block's declarations are
+// initialised, and touching them synchronously would throw.
+setTimeout(applyGiveUp, 0);
+setInterval(applyGiveUp, 5000);
+
+setInterval(updateMeter, 200);
+// The passcode unlock and any tap is a user gesture -- the moment we get one,
+// the AudioContext can legally start.
+["pointerdown", "keydown"].forEach((ev) =>
+  document.addEventListener(ev, () => {
+    if (meterCtx && meterCtx.state !== "running") meterCtx.resume().catch(() => {});
+  }, { passive: true }));
+
+/* Playback can wedge without hls.js raising an error -- the playhead simply
+ * stops. Watch it directly, and also resume if something paused us. */
+function startWatchdog() {
+  if (window.__wd) clearInterval(window.__wd);
+  let last = -1, stalled = 0;
+  window.__wd = setInterval(() => {
+    if (!currentHls) { stalled = 0; return; }
+    if (video.paused && !userPaused) { tryPlay(); stalled = 0; return; }
+    if (video.paused || video.seeking) { stalled = 0; return; }
+    if (video.currentTime === last) {
+      stalled++;
+      if (stalled === 3) {
+        setStatus(T().resync);
+        try {
+          const e = currentHls.liveSyncPosition;
+          if (typeof e === "number" && !isNaN(e)) video.currentTime = e;
+          currentHls.startLoad(); tryPlay();
+        } catch (err) {}
+      } else if (stalled >= 8) {
+        stalled = 0;
+        // Only rebuild if there is actually something live to rebuild onto;
+        // otherwise we would reload the stale playlist and loop it.
+        if (streamHealthy(statusData)) rebuild();
+        else haltPlayback();
+      }
+    } else { stalled = 0; rebuildDelay = 3000; }
+    last = video.currentTime;
+  }, 2000);
+}
+
+function startStats(hls) {
+  if (window.__st) clearInterval(window.__st);
+  window.__st = setInterval(() => {
+    let buffered = 0;
+    for (let i = 0; i < video.buffered.length; i++) {
+      if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+        buffered = video.buffered.end(i) - video.currentTime; break;
+      }
+    }
+    bufferEl.textContent = fmt1(Math.max(0, buffered));
+
+    let edge = null;
+    if (hls && typeof hls.liveSyncPosition === "number" && !isNaN(hls.liveSyncPosition)) edge = hls.liveSyncPosition;
+    else if (video.seekable.length) edge = video.seekable.end(video.seekable.length - 1);
+    edgeEl.textContent = edge === null ? "—" : fmt1(Math.max(0, edge - video.currentTime));
+
+    const pd = hls ? hls.playingDate : null;
+    if (pd instanceof Date && !isNaN(pd.getTime())) {
+      const d = (Date.now() - pd.getTime()) / 1000;
+      if (d < -2 || d > 600) { latencyEl.textContent = T().clock; latencyEl.className = "warn"; }
+      else {
+        const v = Math.max(0, d);
+        latencyEl.textContent = fmt1(v);
+        latencyEl.className = v < 8 ? "good" : v < 20 ? "warn" : "bad";
+      }
+    } else latencyEl.textContent = "—";
+  }, 500);
+}
+
+function loadSource() {
+  if (Hls.isSupported()) {
+    const hls = new Hls({
+      lowLatencyMode: true,
+      liveSyncDurationCount: 6,
+      liveMaxLatencyDurationCount: 20,
+      maxBufferLength: 12,
+      maxMaxBufferLength: 24,
+      backBufferLength: 8,
+      maxLiveSyncPlaybackRate: 1.1
+    });
+    currentHls = hls;
+    window.__hls = hls;          // diagnostics handle
+    hls.loadSource(STREAM_URL);
+    hls.attachMedia(video);
+    startWatchdog();
+    startStats(hls);
+
+    // Declared before the handlers that close over them.
+    let netR = 0, medR = 0;
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => { setStatus(T().live, "live"); tryPlay(); });
+    hls.on(Hls.Events.FRAG_BUFFERED, () => { netR = 0; medR = 0; setStatus(T().live, "live"); });
+    hls.on(Hls.Events.ERROR, (ev, data) => {
+      if (!data.fatal) return;
+      switch (data.type) {
+        case Hls.ErrorTypes.NETWORK_ERROR:
+          netR++; setStatus(T().reconnecting);
+          setTimeout(() => { try { hls.startLoad(); } catch (e) {} }, Math.min(1000 * netR, 8000));
+          break;
+        case Hls.ErrorTypes.MEDIA_ERROR:
+          medR++; setStatus(T().recovering);
+          try { if (medR <= 2) hls.recoverMediaError(); else { hls.swapAudioCodec(); hls.recoverMediaError(); } }
+          catch (e) { rebuild(); }
+          break;
+        default: rebuild();
+      }
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = STREAM_URL;
+    video.addEventListener("loadedmetadata", () => { setStatus(T().live, "live"); startStats(null); tryPlay(); });
+    video.addEventListener("error", () => {
+      setStatus(T().reconnecting);
+      setTimeout(() => { video.src = STREAM_URL; video.load(); tryPlay(); }, 4000);
+    });
+    startWatchdog();
+  }
+}
+
+/* ===================== map ===================== */
+let map, startM, goalM, nowM, pathLine, goalLine, giveupM;
+let followMode = false;      // keep the map centred on the rig
+let mapFitted = false;
+const routeCache = new Map();      // "lat,lon->lat,lon" -> [[lat,lon],...]
+
+
+/* Two ways to look at the journey: zoomed to the rig, or the whole route. */
+function fitOverview() {
+  const pts = [START, GOAL];
+  if (currentPos) pts.push(currentPos);
+  map.fitBounds(L.latLngBounds(pts).pad(0.15));
+}
+function syncMapButtons() {
+  const bf = document.getElementById("btnFollow");
+  if (bf) bf.classList.toggle("on", followMode);
+}
+function enableFollow() {
+  followMode = true;
+  syncMapButtons();
+  if (currentPos) map.setView(currentPos, Math.max(map.getZoom(), 16), { animate: true });
+}
+
+/* Tile sets per language. CARTO renders name:en, so on the Japanese page it
+ * showed English place names at every zoom -- the OSM Japan server renders
+ * local (Japanese) names instead. */
+const TILESETS = {
+  ja: { url: "https://tile.openstreetmap.jp/{z}/{x}/{y}.png",
+        attr: "&copy; <a href='https://osm.org/copyright'>OpenStreetMap</a> contributors | OSM Japan",
+        max: 19 },
+  en: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        attr: "&copy; OpenStreetMap &copy; CARTO", max: 20 }
+};
+let tileLayer = null;
+
+function applyTiles() {
+  const t = TILESETS[LANG] || TILESETS.en;
+  if (tileLayer) map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(t.url, { maxZoom: t.max, attribution: t.attr }).addTo(map);
+  tileLayer.bringToBack();
+}
+
+function initMap() {
+  map = L.map("map", { zoomControl: true, attributionControl: true });
+  window.map = map;   // needed by the resize hook
+  applyTiles();
+  L.control.scale({ imperial: false }).addTo(map);
+  // Attribution must stay legible, and the street-view pane owns the bottom
+  // right corner -- move it to the left so the two cannot overlap.
+  map.attributionControl.setPosition("bottomleft");
+
+  // Everything from start to the current position is one continuous blue
+  // line (recorded fixes, with missing stretches filled by walking routes).
+  // The remaining leg to the goal is a grey dotted estimate.
+  // Grey was near-invisible against the map; orange reads clearly and does
+  // not collide with the blue walked path or the red goal marker.
+  goalLine = L.polyline([], { color: "#ea580c", weight: 5, opacity: .95, dashArray: "1,11", lineCap: "round" }).addTo(map);
+  pathLine = L.polyline([], { color: "#2563eb", weight: 5, opacity: .9 }).addTo(map);
+
+  startM = L.circleMarker(START, { radius: 8, color: "#fff", weight: 3, fillColor: "#16a34a", fillOpacity: 1 })
+            .addTo(map).bindTooltip(T().startName, { permanent: true, direction: "right", offset: [8, 0] });
+  goalM  = L.circleMarker(GOAL,  { radius: 8, color: "#fff", weight: 3, fillColor: "#dc2626", fillOpacity: 1 })
+            .addTo(map).bindTooltip(T().goalName, { permanent: true, direction: "left", offset: [-8, 0] });
+
+  // Where the walk ended. Permanent label so it reads as a landmark of the
+  // route, the same way start and goal do.
+  if (gaveUp()) {
+    giveupM = L.circleMarker(GIVEUP_POS, {
+                radius: 9, color: "#fff", weight: 3, fillColor: "#b91c1c", fillOpacity: 1
+              }).addTo(map)
+               .bindTooltip(T().giveUpWhere, { permanent: true, direction: "top", offset: [0, -8] });
+  }
+
+  fitOverview();
+
+  // Panning by hand means "I want to look somewhere else" -- stop following.
+  map.on("dragstart", () => { if (followMode) { followMode = false; syncMapButtons(); } });
+}
+
+// Walking route between two points, used to fill gaps in the recorded track.
+async function walkRoute(a, b) {
+  const key = a[0].toFixed(5)+","+a[1].toFixed(5)+"->"+b[0].toFixed(5)+","+b[1].toFixed(5);
+  if (routeCache.has(key)) return routeCache.get(key);
+  try {
+    const url = `https://router.project-osrm.org/route/v1/foot/${a[1]},${a[0]};${b[1]},${b[0]}?overview=simplified&geometries=geojson`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if (j.code === "Ok" && j.routes && j.routes.length) {
+      const pts = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      routeCache.set(key, pts);
+      return pts;
+    }
+  } catch (e) {}
+  routeCache.set(key, [a, b]);        // straight line fallback
+  return [a, b];
+}
+
+let trackPts = [];        // [[lat,lon,epoch], ...] recorded fixes
+let currentPos = null;    // live or last-known position
+
+/* Build the journey path: START -> recorded points -> current.
+ * Where consecutive points are far apart, the receiver had no fix, so fill
+ * that stretch with a walking route rather than drawing a false straight line
+ * through buildings. Real and estimated stretches are drawn separately. */
+async function renderPath() {
+  const seq = [START.slice()];
+  // After the give-up the recorded walk is history: take only fixes up to that
+  // moment and end the line there. Positions still arriving from the Pi are
+  // shown as a device marker instead -- they are no longer "the walk".
+  const ended = gaveUp();
+  for (const p of trackPts) {
+    if (ended && p[2] && p[2] > GIVEUP_TS) continue;
+    seq.push([p[0], p[1]]);
+  }
+  if (ended) seq.push(GIVEUP_POS.slice());
+  else if (currentPos) seq.push(currentPos.slice());
+
+  // One continuous blue line from start to now. Stretches where no fix was
+  // recorded are filled with a walking route rather than a straight line
+  // through buildings, but they are drawn in the same blue -- from the
+  // viewer's point of view this is simply "the way taken so far".
+  const line = [];
+  let walkedM = 0;
+  for (let i = 0; i < seq.length - 1; i++) {
+    const a = seq[i], b = seq[i + 1];
+    const d = haversine(a, b);
+    if (d > GAP_M) {
+      const r = await walkRoute(a, b);
+      for (let k = 0; k < r.length - 1; k++) walkedM += haversine(r[k], r[k + 1]);
+      if (!line.length) line.push(a);
+      for (const pt of r) line.push(pt);
+    } else {
+      walkedM += d;
+      if (!line.length) line.push(a);
+      line.push(b);
+    }
+  }
+  pathLine.setLatLngs(line);
+  doneDistEl.textContent = fmtDist(walkedM);
+
+  if (!mapFitted && seq.length) { fitOverview(); mapFitted = true; }
+}
+
+/* Remaining leg: grey dotted, current -> goal, plus the time figures. */
+async function renderRemaining() {
+  if (!currentPos) {
+    routeDistEl.textContent = "—"; remainEl.textContent = "—";
+    totalEl.textContent = "—"; etaEl.textContent = "—";
+    goalLine.setLatLngs([]);
+    return;
+  }
+  // Everything is measured from where the walk actually stopped, and the
+  // figures no longer move: they are the final result, not a live estimate.
+  const ended = gaveUp();
+  const from = ended ? GIVEUP_POS : currentPos;
+
+  // The projected route runs from wherever the journey currently stands --
+  // the live position while walking, the give-up point once it ended.
+  const pts = await walkRoute(from, GOAL);
+  goalLine.setLatLngs(pts);
+
+  let d = 0;
+  for (let i = 0; i < pts.length - 1; i++) d += haversine(pts[i], pts[i + 1]);
+  if (!d) d = haversine(from, GOAL);
+
+  const remainSec = d / WALK_MPS;
+  const endTs = ended ? GIVEUP_TS : Date.now() / 1000;
+  const spentSec = Math.max(0, endTs - journeyStart());
+
+  routeDistEl.textContent = fmtDist(d);
+  remainEl.textContent = fmtEta(remainSec);
+  spentEl.textContent = fmtEta(spentSec);
+  totalEl.textContent = fmtEta(spentSec + remainSec);
+
+  const eta = new Date((endTs + remainSec) * 1000);
+  etaEl.textContent = eta.toLocaleTimeString(LANG === "ja" ? "ja-JP" : "en-GB",
+                        { hour: "2-digit", minute: "2-digit" });
+}
+
+/* The walk starts at 06:00 JST. Use the most recent 06:00 JST in the past,
+ * so the figure stays correct if the page is open past midnight. */
+function journeyStart() {
+  const now = Date.now();
+  const d = new Date(now);
+  // 06:00 JST == 21:00 UTC the previous day.
+  let c = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 21, 0, 0);
+  if (c > now) c -= 86400000;
+  return c / 1000;
+}
+
+/* Reverse geocode the current position for a human-readable place.
+ * Nominatim asks callers to be gentle, so this only fires when the rig has
+ * moved a meaningful distance, and results are cached. */
+let lastGeoPos = null, lastGeoLang = null;
+async function updatePlace() {
+  if (!currentPos) return;
+  if (lastGeoPos && lastGeoLang === LANG && haversine(lastGeoPos, currentPos) < 500) return;
+  lastGeoPos = currentPos.slice(); lastGeoLang = LANG;
+  try {
+    const url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2" +
+                "&lat=" + currentPos[0] + "&lon=" + currentPos[1] +
+                "&zoom=12&accept-language=" + (LANG === "ja" ? "ja" : "en");
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const j = await r.json();
+    const a = j.address || {};
+    const city = a.city || a.town || a.village || a.county || a.city_district || "";
+    const region = a.province || a.state || "";
+    placeEl.textContent = [city, region].filter(Boolean).join(", ") || "—";
+  } catch (e) { /* leave the previous value */ }
+}
+
+/* ===================== data polling ===================== */
+let gpsData = null;
+
+function renderGps() {
+  const d = gpsData;
+  if (!d) return;
+  const age = Math.max(0, Date.now()/1000 - (d.updated || 0));
+  gpsAgeEl.textContent = ageText(age);
+  gpsAgeEl.className = age > 90 ? "bad" : age > 45 ? "warn" : "good";
+  gpsSatsEl.textContent = (d.sats_used || 0) + " / " + (d.sats_seen || 0);
+
+  const alt = (d.alt != null) ? d.alt : d.last_alt;
+  altEl.textContent = (alt != null) ? Math.round(alt) + " m" : "—";
+  spdEl.textContent = (d.speed != null)
+    ? (d.speed * 3.6).toFixed(1) + " km/h" : "—";
+
+  const fixKey = "fix" + (d.fix || 0);
+  gpsFixEl.textContent = T()[fixKey] || "—";
+
+  if (d.fix >= 2 && d.lat != null) {
+    gpsFixEl.className = "good";
+    gpsPosEl.textContent = d.lat.toFixed(5) + ", " + d.lon.toFixed(5);
+    hintEl.textContent = "";
+  } else {
+    gpsFixEl.className = "warn";
+    if (d.last_lat != null) {
+      gpsPosEl.textContent = d.last_lat.toFixed(5) + ", " + d.last_lon.toFixed(5);
+      const when = d.last_fix_time ? new Date(d.last_fix_time*1000).toLocaleTimeString() : "?";
+      const ago = d.last_fix_time ? ageText(Math.max(0, Date.now()/1000 - d.last_fix_time)) : "?";
+      hintEl.textContent = T().lostAt(when, ago);
+    } else {
+      gpsPosEl.textContent = "—";
+      const seen = d.sats_seen || 0;
+      const strongest = (d.snr && d.snr.length) ? Math.max.apply(null, d.snr) : 0;
+      hintEl.textContent = seen === 0 ? T().noFixSky : T().noFixN(seen, strongest);
+    }
+  }
+}
+
+async function pollGps() {
+  try {
+    const r = await fetch(GPS_URL, { cache: "no-store" });
+    if (!r.ok) throw 0;
+    gpsData = await r.json();
+  } catch (e) { return; }
+
+  const d = gpsData;
+  const pos = (d.fix >= 2 && d.lat != null) ? [d.lat, d.lon]
+            : (d.last_lat != null ? [d.last_lat, d.last_lon] : null);
+  if (pos) {
+    currentPos = pos;
+    const live = d.fix >= 2;
+    if (!nowM) {
+      nowM = L.circleMarker(pos, { radius: 8, color: "#fff", weight: 3, fillOpacity: 1 }).addTo(map);
+      nowM.bindTooltip(() => gaveUp() ? T().piPos : T().now);
+    }
+    nowM.setLatLng(pos);
+    // After the give-up this is just where the hardware is, not a walker.
+    nowM.setStyle(gaveUp()
+      ? { fillColor: "#64748b", color: "#e2e8f0", weight: 2, radius: 6, dashArray: "3 2" }
+      : { fillColor: live ? "#2563eb" : "#d97706", color: "#fff", weight: 3, radius: 8, dashArray: null });
+    if (followMode) map.setView(pos, map.getZoom(), { animate: true });
+    updateStreetView(pos, headingFor(pos));
+    await renderPath();
+    await renderRemaining();
+    updatePlace();
+  }
+  renderGps();
+}
+
+/* ---------------- street-level view of the current position ----------------
+ * A small Google Street View pane pinned to the map, re-pointed as the walk
+ * progresses. Loaded via the keyless maps embed, so it needs no API key.
+ *
+ * The iframe is only re-pointed after real movement (or a real turn), never on
+ * every GPS tick: each change is a full iframe reload, which is expensive for
+ * the viewer and pointless for a 1 m step. Nothing here touches the Pi -- it
+ * all runs in the viewer's browser.
+ */
+const svBox = document.getElementById("svBox");
+const svFrame = document.getElementById("svFrame");
+const btnSv = document.getElementById("btnSv");
+
+const SV_MIN_MOVE_M = 25;      // re-point only after this much travel
+const SV_MIN_TURN_DEG = 30;    // ...or this much change of direction
+const SV_MIN_INTERVAL = 8000;  // and never more often than this
+
+let svOn = true, svLastPos = null, svLastHeading = null, svLastAt = 0;
+
+function bearing(a, b) {
+  const toR = (d) => d * Math.PI / 180, toD = (r) => r * 180 / Math.PI;
+  const y = Math.sin(toR(b[1] - a[1])) * Math.cos(toR(b[0]));
+  const x = Math.cos(toR(a[0])) * Math.sin(toR(b[0])) -
+            Math.sin(toR(a[0])) * Math.cos(toR(b[0])) * Math.cos(toR(b[1] - a[1]));
+  return (toD(Math.atan2(y, x)) + 360) % 360;
+}
+
+function angleDiff(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+/* Point the pane at a position. `heading` may be null -- Street View then
+ * picks its own default orientation rather than snapping to north. */
+function updateStreetView(pos, heading) {
+  if (gaveUp() || !svOn || !pos) return;   // nothing left to follow
+  const now = Date.now();
+
+  if (svLastPos) {
+    const moved = haversine(svLastPos, pos);
+    const turned = (heading != null && svLastHeading != null)
+                 ? angleDiff(heading, svLastHeading) : 0;
+    if (moved < SV_MIN_MOVE_M && turned < SV_MIN_TURN_DEG) return;
+    if (now - svLastAt < SV_MIN_INTERVAL) return;
+  }
+
+  svLastPos = pos;
+  svLastHeading = heading;
+  svLastAt = now;
+
+  const h = (heading == null) ? 0 : Math.round(((heading % 360) + 360) % 360);
+  svFrame.src = "https://maps.google.com/maps?q=&layer=c&cbll=" +
+                pos[0].toFixed(6) + "," + pos[1].toFixed(6) +
+                "&cbp=11," + h + ",0,0,0&output=svembed";
+}
+
+/* Direction of travel, so the view faces where the walker is going.
+ *
+ * Two consecutive fixes are far too noisy for this: at walking pace GPS jitter
+ * of a few metres can swing the apparent bearing by tens of degrees, and the
+ * view would spin on the spot. Instead take the bearing over the last ~35 m of
+ * actual track, which averages the jitter out into a stable direction. */
+const SV_BEARING_BASE_M = 35;
+
+function headingFor(pos) {
+  // The receiver's own course over ground is best when it reports one.
+  if (gpsData && typeof gpsData.track === "number" && !isNaN(gpsData.track)) return gpsData.track;
+
+  // Walk back along the recorded track until far enough away to be meaningful.
+  if (Array.isArray(trackPts) && trackPts.length) {
+    for (let i = trackPts.length - 1; i >= 0; i--) {
+      const prev = [trackPts[i][0], trackPts[i][1]];
+      if (haversine(prev, pos) >= SV_BEARING_BASE_M) return bearing(prev, pos);
+    }
+    // Track shorter than the baseline: use whatever extent exists.
+    const first = [trackPts[0][0], trackPts[0][1]];
+    if (haversine(first, pos) > 8) return bearing(first, pos);
+  }
+
+  if (svLastPos && haversine(svLastPos, pos) > 8) return bearing(svLastPos, pos);
+  return svLastHeading;
+}
+
+function setSvVisible(on) {
+  svOn = on;
+  svBox.classList.toggle("show", on);
+  btnSv.classList.toggle("on", on);
+  if (!on) {
+    svFrame.src = "about:blank";      // stop it loading while hidden
+    svLastPos = null;
+  } else if (currentPos) {
+    svLastAt = 0;
+    updateStreetView(currentPos, svLastHeading);
+  }
+}
+
+btnSv.addEventListener("click", () => setSvVisible(!svOn));
+document.getElementById("svClose").addEventListener("click", () => setSvVisible(false));
+
+async function pollTrack() {
+  try {
+    const r = await fetch(TRACK_URL, { cache: "no-store" });
+    if (!r.ok) return;
+    const t = await r.json();
+    if (Array.isArray(t.points)) { trackPts = t.points; await renderPath(); }
+  } catch (e) {}
+}
+
+let statusData = null;
+function renderStatus() {
+  const playing = !video.paused && video.readyState >= 3;
+  nWeb.className = "node " + (playing ? "ok" : "warn");
+  const d = statusData;
+
+  if (!d) {
+    piPingEl.textContent = "—"; piPingEl.className = "";
+    piPubEl.textContent = "—"; piPubEl.className = "";
+    verdictEl.textContent = T().vNoServer; verdictEl.className = "verdict bad";
+    return;
+  }
+  const age = Math.max(0, Date.now()/1000 - (d.updated || 0));
+  if (age > 60) {
+    nPi.className = "node warn"; nTx.className = "node warn";
+    verdictEl.textContent = T().vStale; verdictEl.className = "verdict bad";
+    return;
+  }
+
+  // Ping and stream are reported separately: "Pi is dead" and "Pi is up but
+  // the encoder stopped" look identical from the stream alone, and need
+  // completely different responses.
+  piPingEl.textContent = d.pi_ping ? T().pingOk : T().pingNg;
+  piPingEl.className = d.pi_ping ? "good" : "bad";
+  piPubEl.textContent = d.pi_publishing ? T().pubOk : T().pubNg;
+  piPubEl.className = d.pi_publishing ? "good" : "warn";
+
+  // The pi node folds both in: green = fine, amber = alive but silent,
+  // red = not answering at all.
+  nPi.className = "node " + (!d.pi_ping ? "bad" : (d.pi_publishing ? "ok" : "warn"));
+  nTx.className = "node " + (d.transcode_ok ? "ok" : "bad");
+
+  let msg = "", bad = true;
+  if (!d.pi_ping) msg = T().vPiOffline;
+  else if (!d.pi_publishing) msg = T().vPiUpNoStream + " " + T().waitingLive;
+  else if (!d.transcode_ok) msg = T().vTxDown + (d.segment_age != null ? ` (${d.segment_age}s)` : "") + ".";
+  else if (!playing) msg = T().vPaused;
+  else { msg = ""; bad = false; }
+  verdictEl.textContent = msg;
+  verdictEl.className = "verdict" + (bad && msg ? " bad" : "");
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch(STATUS_URL, { cache: "no-store" });
+    statusData = r.ok ? await r.json() : null;
+  } catch (e) { statusData = null; }
+  renderStatus();
+  checkOutage(statusData);
+  supervisePlayback(statusData);
+}
+
+/* ===================== boot ===================== */
+document.getElementById("btnFollow").addEventListener("click", enableFollow);
+document.getElementById("btnAll").addEventListener("click", () => {
+  followMode = false; syncMapButtons(); fitOverview();
+});
+
+document.getElementById("btnJa").addEventListener("click", () => setLang("ja", true));
+document.getElementById("btnEn").addEventListener("click", () => setLang("en", true));
+
+setStatus(T().connecting);
+detectLang();
+initMap();
+loadSource();
+
+pollGps();    setInterval(pollGps, 10000);
+pollTrack();  setInterval(pollTrack, 30000);
+pollStatus(); setInterval(pollStatus, 8000);
+/* ===================== archive ===================== */
+/* Recordings are segmented on disk, but served as a per-day VOD HLS playlist
+ * so the viewer gets ONE continuous timeline and can scrub the whole day --
+ * the split is invisible.
+ *
+ * Each segment carries EXT-X-PROGRAM-DATE-TIME, so hls.js reports the exact
+ * wall-clock time of the frame on screen (`playingDate`). GPS position is
+ * looked up against that, with no filename arithmetic and no assumption that
+ * recording was continuous.
+ */
+const ARCHIVE_INDEX = BASE + "/archive.json";
+const ARCHIVE_BASE  = BASE + "/archive/";
+
+const avideo = document.getElementById("avideo");
+const archSel = document.getElementById("archSel");
+const archWrap = document.getElementById("archWrap");
+const archTimeEl = document.getElementById("archTime");
+const btnLive = document.getElementById("btnLive");
+const btnArch = document.getElementById("btnArch");
+
+let archDays = [], archHls = null, archMarker = null;
+let gpsLogCache = new Map();
+
+function fmtClock(epoch) {
+  return new Date(epoch * 1000).toLocaleString(LANG === "ja" ? "ja-JP" : "en-GB",
+    { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function fmtHM(sec) {
+  const h = Math.floor(sec / 3600), m = Math.round((sec - h * 3600) / 60);
+  return LANG === "ja" ? `${h}時間${m}分` : `${h}h ${m}m`;
+}
+
+async function loadArchiveIndex() {
+  try {
+    const r = await fetch(ARCHIVE_INDEX, { cache: "no-store" });
+    if (!r.ok) return;
+    archDays = (await r.json()).days || [];
+  } catch (e) { return; }
+
+  const keep = archSel.value;
+  archSel.innerHTML = "";
+  if (!archDays.length) {
+    const o = document.createElement("option");
+    o.textContent = T().noArch; o.disabled = true;
+    archSel.appendChild(o);
+    return;
+  }
+  for (const d of archDays) {
+    const o = document.createElement("option");
+    o.value = d.playlist;
+    // Recordings are indexed either side of the give-up; name which is which
+    // so the journey is not mixed up with what was filmed afterwards.
+    const phase = d.phase ? "  " + (d.phase === "walk" ? T().phaseWalk : T().phaseAfter) : "";
+    o.textContent = d.day + phase + "  (" + fmtHM(d.duration) + ", " + d.size_mb + " MB)" + (d.live ? "  ●" : "");
+    archSel.appendChild(o);
+  }
+  if (keep && archDays.some(d => d.playlist === keep)) archSel.value = keep;
+}
+
+async function gpsLogFor(dayStr) {
+  if (gpsLogCache.has(dayStr)) return gpsLogCache.get(dayStr);
+  let rows = [];
+  try {
+    const r = await fetch(ARCHIVE_BASE + "gps/" + dayStr + ".jsonl", { cache: "no-store" });
+    if (r.ok) {
+      rows = (await r.text()).trim().split("\n")
+        .map(l => { try { return JSON.parse(l); } catch (e) { return null; } })
+        .filter(Boolean).sort((a, b) => a.t - b.t);
+    }
+  } catch (e) {}
+  gpsLogCache.set(dayStr, rows);
+  return rows;
+}
+
+// Interpolate between the two nearest fixes so the marker moves smoothly.
+function positionAt(rows, t) {
+  if (!rows.length) return null;
+  if (t <= rows[0].t) return [rows[0].lat, rows[0].lon];
+  const last = rows[rows.length - 1];
+  if (t >= last.t) return [last.lat, last.lon];
+  let lo = 0, hi = rows.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rows[m].t <= t) lo = m; else hi = m; }
+  const a = rows[lo], b = rows[hi], span = b.t - a.t;
+  const f = span > 0 ? (t - a.t) / span : 0;
+  return [a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f];
+}
+
+async function syncArchiveMap() {
+  if (!archHls) return;
+  const pd = archHls.playingDate;           // exact wall clock of the current frame
+  if (!(pd instanceof Date) || isNaN(pd.getTime())) return;
+  const absT = pd.getTime() / 1000;
+  const day = pd.toISOString().slice(0, 10);
+  const rows = await gpsLogFor(day);
+  const pos = positionAt(rows, absT);
+
+  archTimeEl.innerHTML = T().recAt + ": <b>" + fmtClock(absT) + "</b>" +
+    (pos ? "  ·  " + T().archPos + ": <b>" + pos[0].toFixed(5) + ", " + pos[1].toFixed(5) + "</b>"
+         : "  ·  " + T().archPos + ": —");
+
+  if (pos) {
+    if (!archMarker) {
+      archMarker = L.circleMarker(pos, { radius: 9, color: "#fff", weight: 3,
+                                         fillColor: "#7c3aed", fillOpacity: 1 }).addTo(map);
+    }
+    archMarker.setLatLng(pos).setStyle({ opacity: 1, fillOpacity: 1 });
+    updateStreetView(pos, svLastPos ? bearing(svLastPos, pos) : null);
+  }
+}
+
+function playArchive(playlist) {
+  if (archHls) { try { archHls.destroy(); } catch (e) {} archHls = null; }
+  const url = ARCHIVE_BASE + playlist;
+  if (Hls.isSupported()) {
+    archHls = new Hls({ enableWorker: true, backBufferLength: 60 });
+    archHls.loadSource(url);
+    archHls.attachMedia(avideo);
+    archHls.on(Hls.Events.MANIFEST_PARSED, () => { avideo.play().catch(() => {}); });
+  } else if (avideo.canPlayType("application/vnd.apple.mpegurl")) {
+    avideo.src = url;
+    avideo.play().catch(() => {});
+  }
+  syncArchiveMap();
+}
+
+function setMode(archive) {
+  btnArch.classList.toggle("on", archive);
+  btnLive.classList.toggle("on", !archive);
+  archWrap.classList.toggle("show", archive);
+  video.style.display = archive ? "none" : "block";
+  avideo.style.display = archive ? "block" : "none";
+  soundBtn.classList.remove("show");
+
+  if (archive) {
+    video.pause();
+    loadArchiveIndex().then(() => { if (archSel.value) playArchive(archSel.value); });
+  } else {
+    avideo.pause();
+    if (archHls) { try { archHls.destroy(); } catch (e) {} archHls = null; }
+    if (archMarker) archMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+    tryPlay();
+  }
+}
+
+btnLive.addEventListener("click", () => setMode(false));
+btnArch.addEventListener("click", () => setMode(true));
+archSel.addEventListener("change", () => playArchive(archSel.value));
+avideo.addEventListener("timeupdate", () => { if (archWrap.classList.contains("show")) syncArchiveMap(); });
+avideo.addEventListener("seeked", syncArchiveMap);
+
+loadArchiveIndex();
+setInterval(() => { if (archWrap.classList.contains("show")) loadArchiveIndex(); }, 60000);
+
+/* ===================== passcode gate ===================== */
+/* Soft lock: it keeps the UI away from casual visitors. It is NOT real
+ * access control -- the stream and JSON endpoints remain reachable to anyone
+ * who knows their URLs. Server-side auth would be needed for that, at the
+ * cost of breaking native HLS playback on iPhone (which cannot send auth
+ * headers). Documented rather than pretended otherwise.
+ */
+const PASS_SHA256 = CFG.passSha256 || "";
+const lockEl = document.getElementById("lock");
+const lockInput = document.getElementById("lockInput");
+const lockBtn = document.getElementById("lockBtn");
+const lockErr = document.getElementById("lockErr");
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function unlockUI() {
+  lockEl.classList.add("hidden");
+  setTimeout(fixMapSize, 150);      // map was hidden while locked
+}
+async function tryUnlock() {
+  const v = lockInput.value || "";
+  if (!v) return;
+  const h = await sha256Hex(v);
+  if (h === PASS_SHA256) {
+    try { localStorage.setItem("xhome_unlocked", h); } catch (e) {}
+    lockErr.textContent = "";
+    unlockUI();
+  } else {
+    lockErr.textContent = T().lockBad;
+    lockInput.value = "";
+    lockInput.focus();
+  }
+}
+lockBtn.addEventListener("click", tryUnlock);
+lockInput.addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+try {
+  if (localStorage.getItem("xhome_unlocked") === PASS_SHA256) unlockUI();
+  else setTimeout(() => lockInput.focus(), 200);
+} catch (e) {}
+
+/* ===================== outage alerts ===================== */
+/* Fires when the broadcast comes back after being down for 10+ minutes
+ * continuously -- i.e. a real outage recovering, not a brief hiccup.
+ *
+ * The down-since marker is persisted, so an outage spanning a page reload or
+ * an app restart is still recognised when it recovers.
+ */
+const DOWN_THRESHOLD_MIN = 10;
+const btnNotify = document.getElementById("btnNotify");
+let alertsOn = false;
+let swReg = null;
+
+function setNotifyUI() {
+  btnNotify.classList.toggle("armed", alertsOn);
+  btnNotify.title = alertsOn ? T().notifOn : T().notifOff;
+}
+
+async function toggleAlerts() {
+  if (alertsOn) {
+    alertsOn = false;
+    try { localStorage.setItem("xhome_alerts", "0"); } catch (e) {}
+    setNotifyUI();
+    return;
+  }
+  if (!("Notification" in window)) { alert(T().notifIos); return; }
+  let perm = Notification.permission;
+  if (perm === "default") perm = await Notification.requestPermission();
+  if (perm !== "granted") { alert(perm === "denied" ? T().notifDenied : T().notifIos); return; }
+  alertsOn = true;
+  try { localStorage.setItem("xhome_alerts", "1"); } catch (e) {}
+  setNotifyUI();
+}
+btnNotify.addEventListener("click", toggleAlerts);
+try { alertsOn = localStorage.getItem("xhome_alerts") === "1" && Notification.permission === "granted"; } catch (e) {}
+setNotifyUI();
+
+function notify(title, body) {
+  if (!alertsOn) return;
+  try {
+    // Route through the service worker: iOS only allows notifications from a
+    // registration, not from a bare page Notification constructor.
+    if (swReg && swReg.active) {
+      swReg.active.postMessage({ type: "notify", title, body, tag: "xhome-recovery" });
+    } else if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/icon-192.png" });
+    }
+  } catch (e) {}
+}
+
+
+/* ---------- playback supervisor ----------
+ * hls.js can end up idle after a long outage: it exhausts its own retries, or
+ * the media element is left paused, and nothing brings it back even once the
+ * broadcast returns. The server already tells us when the stream is healthy,
+ * so use that as the authority and restart playback ourselves.
+ *
+ * Requires two consecutive healthy-but-not-playing checks (~16s) so it does
+ * not fight normal buffering, and never overrides a deliberate user pause.
+ */
+let idleChecks = 0;
+let streamWasDown = false;
+
+function inArchiveMode() {
+  return archWrap && archWrap.classList.contains("show");
+}
+
+/* Stop cleanly when the broadcast stops.
+ *
+ * The playlist stays fetchable after the source dies -- it just stops gaining
+ * segments. Rebuilding the player against it replays those stale segments
+ * from the beginning, which looks exactly like the video looping. So when the
+ * server reports the stream down, tear the player down and say so, rather
+ * than showing old footage as if it were live.
+ */
+function haltPlayback() {
+  if (currentHls) { try { currentHls.destroy(); } catch (e) {} currentHls = null; }
+  if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+  window.__hls = null;
+  try { video.pause(); } catch (e) {}
+  setStatus(T().stopped, "offline");
+}
+
+function supervisePlayback(d) {
+  if (inArchiveMode()) { idleChecks = 0; return; }
+
+  if (!streamHealthy(d)) {
+    if (!streamWasDown) {
+      streamWasDown = true;
+      haltPlayback();                  // stop looping old segments
+    }
+    idleChecks = 0;
+    return;
+  }
+
+  // Stream is back: start fresh so we pick up live segments, not the tail of
+  // the stale playlist we were holding.
+  if (streamWasDown) {
+    streamWasDown = false;
+    idleChecks = 0;
+    forceRebuild();
+    return;
+  }
+
+  if (userPaused) { idleChecks = 0; return; }
+  const playing = !video.paused && video.readyState >= 3;
+  if (playing) { idleChecks = 0; return; }
+
+  idleChecks++;
+  if (idleChecks >= 2) {
+    idleChecks = 0;
+    if (video.paused && video.readyState >= 3) tryPlay();
+    else forceRebuild();
+  }
+}
+
+function streamHealthy(d) {
+  return !!(d && d.pi_ping && d.pi_publishing && d.transcode_ok);
+}
+
+function checkOutage(d) {
+  let downSince = null;
+  try { const v = localStorage.getItem("xhome_down_since"); if (v) downSince = parseInt(v, 10); } catch (e) {}
+  const now = Math.floor(Date.now() / 1000);
+
+  if (!streamHealthy(d)) {
+    if (!downSince) { try { localStorage.setItem("xhome_down_since", String(now)); } catch (e) {} }
+    return;
+  }
+  // Healthy now -- was it down long enough to be worth announcing?
+  if (downSince) {
+    const mins = Math.round((now - downSince) / 60);
+    try { localStorage.removeItem("xhome_down_since"); } catch (e) {}
+    if (mins >= DOWN_THRESHOLD_MIN) notify(T().recovTitle, T().recovBody(mins));
+  }
+}
+
+/* ===================== service worker ===================== */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js")
+    .then(r => { swReg = r; })
+    .catch(() => {});
+}
+
+/* ===================== viewer count ===================== */
+/* Counted server-side from actual media-segment requests in the last 60s,
+ * not from open tabs: a paused player stops fetching and correctly drops out.
+ */
+const VIEWERS_URL = BASE + "/viewers.json";
+const viewersEl = document.getElementById("viewers");
+const viewCountEl = document.getElementById("viewCount");
+
+async function pollViewers() {
+  try {
+    const r = await fetch(VIEWERS_URL, { cache: "no-store" });
+    if (!r.ok) throw 0;
+    const d = await r.json();
+    const age = Math.max(0, Date.now() / 1000 - (d.updated || 0));
+    if (age > 120) { viewCountEl.textContent = "—"; viewersEl.classList.remove("some"); return; }
+    const total = d.total || 0;
+    viewCountEl.textContent = total;
+    viewersEl.classList.toggle("some", total > 0);
+    viewersEl.title = T().watching(d.live || 0, d.archive || 0);
+  } catch (e) {
+    viewCountEl.textContent = "—";
+    viewersEl.classList.remove("some");
+  }
+}
+pollViewers();
+setInterval(pollViewers, 10000);
+
+/* Leaflet caches its container size; in a flex/grid layout that changes on
+ * resize and orientation flips, so it must be told explicitly or the map
+ * renders into a stale viewport (grey bands, wrong centre). */
+function fixMapSize() { if (window.map) setTimeout(() => map.invalidateSize(), 120); }
+window.addEventListener("resize", fixMapSize);
+window.addEventListener("orientationchange", fixMapSize);
+setTimeout(fixMapSize, 300);
+</script>
+</body>
+</html>

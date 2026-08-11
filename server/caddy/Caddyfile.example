@@ -1,0 +1,91 @@
+# Xhome — broadcast origin (Caddy).
+#
+# Serves the HLS output, the JSON state files and the archive to the public
+# site. Only this block is needed; put it in your Caddyfile (or import it).
+#
+# Deliberately a bare `:2020` site address rather than a hostname: this sits
+# behind a tunnel/reverse proxy that forwards with its own Host header, and
+# matching on a hostname here silently 404s every request.
+#
+# Environment:
+#   APP_DIR      scripts + state files   (e.g. C:\broadcast)
+#   ARCHIVE_DIR  recordings + GPS logs   (e.g. D:\xhome)
+#
+# CORS is wide open because the site is served from a different origin than
+# the stream; tighten Access-Control-Allow-Origin to your site if you prefer.
+
+:2020 {
+	log {
+		output file {$APP_DIR}/access-xhome.log {
+			roll_size 8MiB
+			roll_keep 2
+		}
+		format json
+	}
+
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		Access-Control-Allow-Headers *
+	}
+
+	handle /live/hd/* {
+		uri strip_prefix /live/hd
+		root * {$APP_DIR}/hlsout
+		file_server
+	}
+
+	handle /live/* {
+		reverse_proxy localhost:18888
+	}
+
+	handle /api/status {
+		respond `{"status":"ok","service":"xhome-stream"}` 200
+	}
+
+	handle /comment.json {
+		root * {$APP_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle /viewers.json {
+		root * {$APP_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle /status.json {
+		root * {$APP_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle /track.json {
+		root * {$APP_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle /archive.json {
+		root * {$ARCHIVE_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle /archive/* {
+		uri strip_prefix /archive
+		root * {$ARCHIVE_DIR}
+		file_server
+	}
+
+	handle /gps.json {
+		root * {$APP_DIR}
+		file_server
+		header Cache-Control "no-store"
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}

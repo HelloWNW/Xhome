@@ -1,0 +1,15 @@
+[Unit]
+Description=xhome broadcast capture and RTMP push
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xhome-broadcast.sh
+Restart=always
+RestartSec=3
+User=${XHOME_USER}
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target
