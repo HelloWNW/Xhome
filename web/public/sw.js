@@ -34,8 +34,8 @@ self.addEventListener("message", e => {
   if (d.type === "notify") {
     self.registration.showNotification(d.title || "xhome", {
       body: d.body || "",
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      icon: "icon-192.png",
+      badge: "icon-192.png",
       tag: d.tag || "xhome-stream",
       renotify: true
     });
@@ -46,6 +46,6 @@ self.addEventListener("notificationclick", e => {
   e.notification.close();
   e.waitUntil(clients.matchAll({ type: "window" }).then(list => {
     for (const c of list) if ("focus" in c) return c.focus();
-    if (clients.openWindow) return clients.openWindow("/");
+    if (clients.openWindow) return clients.openWindow("./");
   }));
 });

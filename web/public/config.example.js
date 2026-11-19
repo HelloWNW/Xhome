@@ -1,18 +1,40 @@
 /* Xhome — site configuration.
  *
  * Everything installation-specific lives here so the page itself contains no
- * addresses, coordinates or secrets. Copy this file, fill it in, and deploy.
+ * addresses, coordinates or secrets. Copy this file to config.js, fill it in,
+ * and deploy (GitHub Pages deploys web/public as it is).
  *
  * NOTE ON THE PASSCODE: `passSha256` only hides the UI. It is a client-side
- * gate, so it keeps casual visitors out but does NOT protect the stream URLs,
- * which stay publicly fetchable. If you need real protection, put auth in
- * front of the origin (Caddy basic_auth, Cloudflare Access, or similar).
+ * gate, so it keeps casual visitors out but does NOT protect the YouTube
+ * links, which are public in this file.
  */
 window.XHOME_CONFIG = {
-  // Base URL of the broadcast origin (Caddy). No trailing slash.
-  streamBase: "https://stream.example.com",
+  // ---- video: YouTube lives -------------------------------------------
+  // Live N starts at t0 + (N-1) * stepHours. The page switches to live N+1
+  // at exactly that moment (viewers' own clocks are used, so no server).
+  t0: "2026-11-21T00:00:00+09:00",
+  stepHours: 10,
+  lives: [
+    { n: 1, videoId: "YOUTUBE_VIDEO_ID_1" },
+    { n: 2, videoId: "YOUTUBE_VIDEO_ID_2" },
+    // optional per live: videoStart: "2026-11-21T00:01:30+09:00"  (when the YouTube
+    // broadcast really began; improves replay <-> GPS alignment)
+  ],
 
-  // Journey endpoints: [latitude, longitude]
+  // Test stream: until `until`, this video is shown instead of the schedule.
+  // Remove the block (or let it expire) for the real run.
+  dev: { videoId: "YOUTUBE_TEST_VIDEO_ID", until: "2026-11-21T00:00:00+09:00" },
+
+  // ---- data endpoint (GPS / track / status / lives.json), no trailing slash.
+  // Served by the stream container through a Tailscale Funnel. Leave empty
+  // until it exists: the site then simply shows no GPS data.
+  dataBase: "",
+
+  // GPS history for replay, one file per UTC day (YYYY-MM-DD.jsonl).
+  historyBase: "https://raw.githubusercontent.com/HelloWNW/Xhome/data/gps/",
+
+  // ---- journey ---------------------------------------------------------
+  // Endpoints: [latitude, longitude]
   start: [35.0000, 135.0000],
   goal:  [35.5000, 135.5000],
   startName: { ja: "スタート地点", en: "Start" },

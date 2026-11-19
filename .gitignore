@@ -3,7 +3,6 @@
 *.env
 !*.env.example
 /etc/xhome.env
-web/public/config.js
 wrangler.toml
 
 # runtime state
