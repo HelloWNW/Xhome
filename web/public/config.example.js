@@ -31,7 +31,7 @@ window.XHOME_CONFIG = {
   dataBase: "",
 
   // GPS history for replay, one file per UTC day (YYYY-MM-DD.jsonl).
-  historyBase: "https://raw.githubusercontent.com/HelloWNW/Xhome/data/gps/",
+  historyBase: "",
 
   // ---- journey ---------------------------------------------------------
   // Endpoints: [latitude, longitude]

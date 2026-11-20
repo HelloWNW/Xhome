@@ -21,3 +21,6 @@ hlsout/
 # os / editor
 .DS_Store
 node_modules/
+
+# real site config lives in the private deployment repo
+web/public/config.js

@@ -384,7 +384,7 @@
 const CFG  = window.XHOME_CONFIG || {};
 const BASE = (CFG.dataBase || CFG.streamBase || "").replace(/\/+$/, "");   // JSON endpoint (GPS / status / lives)
 
-const HIST_BASE = (CFG.historyBase || "https://raw.githubusercontent.com/HelloWNW/Xhome/data/gps/");
+const HIST_BASE = (CFG.historyBase || "");
 const GPS_URL    = BASE + "/gps.json";
 const TRACK_URL  = BASE + "/track.json";
 const STATUS_URL = BASE + "/status.json";
